@@ -1,0 +1,35 @@
+{
+    "mcpServers": {
+        "brave-search": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-brave-search"
+            ],
+            "env": {
+                "BRAVE_API_KEY": "your-brave-api-key-here"
+            }
+        },
+        "google-search": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-google-search"
+            ],
+            "env": {
+                "GOOGLE_API_KEY": "your-google-api-key-here",
+                "GOOGLE_CSE_ID": "your-google-cse-id-here"
+            }
+        },
+        "weather": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-weather"
+            ],
+            "env": {
+                "OPENWEATHER_API_KEY": "your-openweather-api-key-here"
+            }
+        }
+    }
+}
