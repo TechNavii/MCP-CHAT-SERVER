@@ -1,6 +1,8 @@
 # MCP Chat Server
 
 A FastAPI-based chat server that integrates with Model Context Protocol (MCP) servers to provide enhanced AI capabilities.
+Infludenced from Cole Medin`s project. (using basics like agent and client from below repository)
+https://github.com/coleam00/ottomator-agents/tree/main/pydantic-ai-mcp-agent
 
 ## Features
 
