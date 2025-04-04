@@ -89,6 +89,20 @@ async def websocket_endpoint(websocket: WebSocket):
         # Initialize the agent for this connection
         mcp_agent_client, mcp_agent = await get_pydantic_ai_agent()
         
+        # Send the tools information to the client
+        tools_info = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters_json_schema if hasattr(tool, 'parameters_json_schema') else None
+            }
+            for tool in mcp_agent_client.tools
+        ]
+        await websocket.send_text(json.dumps({
+            "type": "tools",
+            "content": tools_info
+        }))
+        
         while True:
             # Receive message from client
             data = await websocket.receive_text()
@@ -144,7 +158,16 @@ async def websocket_endpoint(websocket: WebSocket):
     finally:
         if mcp_agent_client:
             logger.info("Cleaning up MCP client resources...")
-            await mcp_agent_client.cleanup()
+            try:
+                # Add a timeout to the cleanup to prevent hanging
+                async with asyncio.timeout(5.0):  # 5 second timeout
+                    await mcp_agent_client.cleanup()
+            except asyncio.TimeoutError:
+                logger.warning("MCP client cleanup timed out")
+            except asyncio.CancelledError:
+                logger.info("MCP client cleanup was cancelled")
+            except Exception as e:
+                logger.error(f"Error during MCP client cleanup: {e}", exc_info=True)
         logger.info("WebSocket connection closed.")
 
 # Serve static files (CSS, JS)
@@ -164,4 +187,4 @@ async def read_root() -> FileResponse:
 if __name__ == "__main__":
     import uvicorn
     logger.info("Starting Uvicorn server...")
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    uvicorn.run(app, host="0.0.0.0", port=8000)
