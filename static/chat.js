@@ -1,249 +1,261 @@
 class ChatApp {
     constructor() {
+        // Initialize properties
         this.ws = null;
-        this.messageHistory = [];
-        this.isTyping = false;
-        this.currentAssistantMessage = '';
-        this.currentAssistantMessageDiv = null;
+        this.tools = [];
+        this.isConnected = false;
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectDelay = 1000;
 
-        // DOM elements
-        this.messagesContainer = document.getElementById('chat-messages');
+        // Get DOM elements
         this.messageInput = document.getElementById('message-input');
         this.sendButton = document.getElementById('send-button');
-        this.statusIndicator = document.querySelector('.status');
-        this.statusText = this.statusIndicator.querySelector('span');
+        this.chatMessages = document.getElementById('chat-messages');
+        this.statusIndicator = document.querySelector('.status-indicator');
+        this.statusText = document.querySelector('.status-text');
+        this.toolsPanel = document.getElementById('tools-panel');
+        this.toolsList = document.getElementById('tools-list');
+        this.toggleToolsBtn = document.getElementById('toggle-tools-btn');
+        this.closeToolsBtn = document.querySelector('.close-tools-btn');
 
-        // Templates
-        this.messageTemplate = document.getElementById('messageTemplate');
-        this.loadingTemplate = document.getElementById('loadingTemplate');
-        this.errorTemplate = document.getElementById('errorTemplate');
+        // Get templates
+        this.messageTemplate = document.getElementById('message-template');
+        this.loadingTemplate = document.getElementById('loading-template');
+        this.errorTemplate = document.getElementById('error-template');
+        this.toolTemplate = document.getElementById('tool-template');
 
-        // Bind methods
-        this.sendMessage = this.sendMessage.bind(this);
-        this.handleKeyDown = this.handleKeyDown.bind(this);
+        // Initialize event listeners
+        this.initEventListeners();
 
-        // Initialize
+        // Initialize WebSocket connection
         this.initWebSocket();
-        this.setupEventListeners();
-        console.log('ChatApp initialized');
+
+        // Configure marked options
+        marked.setOptions({
+            highlight: function(code, lang) {
+                const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+                return hljs.highlight(code, { language }).value;
+            },
+            langPrefix: 'hljs language-'
+        });
+    }
+
+    initEventListeners() {
+        // Message sending
+        this.sendButton.addEventListener('click', () => this.sendMessage());
+        this.messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+        });
+
+        // Input handling
+        this.messageInput.addEventListener('input', () => {
+            this.messageInput.style.height = 'auto';
+            this.messageInput.style.height = this.messageInput.scrollHeight + 'px';
+            this.sendButton.disabled = !this.messageInput.value.trim();
+        });
+
+        // Tools panel
+        this.toggleToolsBtn.addEventListener('click', () => this.toggleTools());
+        this.closeToolsBtn.addEventListener('click', () => this.toggleTools());
+
+        // Initialize send button as disabled
+        this.sendButton.disabled = true;
     }
 
     initWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
-        console.log(`Connecting to WebSocket: ${wsUrl}`);
 
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
             console.log('WebSocket connection established');
-            this.sendButton.disabled = false;
+            this.isConnected = true;
+            this.reconnectAttempts = 0;
             this.updateConnectionStatus(true);
-            this.addSystemMessage('Connected to the chat server.');
         };
 
-        this.ws.onclose = (event) => {
-            console.log('WebSocket connection closed:', event.code, event.reason);
-            this.sendButton.disabled = true;
+        this.ws.onclose = () => {
+            console.log('WebSocket connection closed');
+            this.isConnected = false;
             this.updateConnectionStatus(false);
-            this.addSystemMessage('Connection lost. Attempting to reconnect...');
-            setTimeout(() => this.initWebSocket(), 5000);
+            this.handleReconnect();
         };
 
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
-            this.updateConnectionStatus(false, 'Error');
-            this.addSystemMessage('WebSocket connection error.');
+            this.showError('Connection error occurred');
         };
 
         this.ws.onmessage = (event) => {
-            console.debug('WebSocket message received:', event.data);
-            try {
-                const data = JSON.parse(event.data);
+            const data = JSON.parse(event.data);
+            console.log('Received message:', data);
 
-                switch (data.type) {
-                    case 'delta':
-                        this.updateAssistantMessage(data.content);
-                        break;
-                    case 'complete':
-                        this.finalizeAssistantMessage(data.content);
-                        break;
-                    case 'error':
-                        this.showError(data.content);
-                        if (this.isTyping) {
-                            this.finalizeAssistantMessage('', true);
-                        }
-                        break;
-                    default:
-                        console.warn('Received unknown message type:', data.type);
-                }
-            } catch (e) {
-                console.error('Failed to parse WebSocket message:', e);
-                this.showError('Received malformed data from server.');
+            switch (data.type) {
+                case 'tools':
+                    this.handleToolsUpdate(data.content);
+                    break;
+                case 'delta':
+                    this.handleMessageDelta(data.content);
+                    break;
+                case 'complete':
+                    this.finalizeAssistantMessage(data.content);
+                    break;
+                case 'error':
+                    this.showError(data.content);
+                    break;
+                default:
+                    console.warn('Unknown message type:', data.type);
             }
         };
     }
 
-    updateConnectionStatus(isConnected, status = null) {
-        const statusDot = this.statusIndicator.querySelector('.status-indicator');
-        const statusText = this.statusIndicator.querySelector('span');
-        
-        if (isConnected) {
-            statusDot.style.backgroundColor = 'var(--success-color)';
-            statusText.textContent = 'Connected';
+    updateConnectionStatus(connected) {
+        this.statusIndicator.classList.toggle('connected', connected);
+        this.statusText.textContent = connected ? 'Connected' : 'Disconnected';
+        this.sendButton.disabled = !connected || !this.messageInput.value.trim();
+    }
+
+    handleReconnect() {
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+            this.reconnectAttempts++;
+            console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
+            setTimeout(() => this.initWebSocket(), this.reconnectDelay * this.reconnectAttempts);
         } else {
-            statusDot.style.backgroundColor = 'var(--error-color)';
-            statusText.textContent = status || 'Disconnected';
+            this.showError('Could not reconnect to the server. Please refresh the page.');
         }
     }
 
-    setupEventListeners() {
-        // Auto-resize textarea
-        this.messageInput.addEventListener('input', () => {
-            this.messageInput.style.height = 'auto';
-            const scrollHeight = this.messageInput.scrollHeight;
-            const maxHeight = 150;
-            this.messageInput.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
-        });
-
-        // Send button click
-        this.sendButton.addEventListener('click', this.sendMessage);
-
-        // Keydown listener
-        this.messageInput.addEventListener('keydown', this.handleKeyDown);
-
-        // Ensure button is disabled initially until WS connects
-        this.sendButton.disabled = true;
+    handleToolsUpdate(tools) {
+        console.log('Updating tools:', tools);
+        this.tools = tools;
+        this.renderTools();
     }
 
-    addMessage(content, role, isTyping = false) {
-        const messageDiv = this.messageTemplate.content.cloneNode(true).querySelector('.message');
-        messageDiv.classList.add(role);
-        if (isTyping) messageDiv.classList.add('typing');
-        
-        const messageContent = messageDiv.querySelector('.message-content');
-        messageContent.innerHTML = this.formatMarkdown(content);
-        
-        this.messagesContainer.appendChild(messageDiv);
-        this.scrollToBottom();
-        return messageDiv;
-    }
+    renderTools() {
+        this.toolsList.innerHTML = '';
+        this.tools.forEach(tool => {
+            const toolElement = this.toolTemplate.content.cloneNode(true);
+            toolElement.querySelector('.tool-name').textContent = tool.name;
+            toolElement.querySelector('.tool-description').textContent = tool.description;
 
-    addSystemMessage(content) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message system';
-        messageDiv.textContent = content;
-        this.messagesContainer.appendChild(messageDiv);
-        this.scrollToBottom();
-    }
-
-    updateAssistantMessage(delta) {
-        if (!this.isTyping) {
-            this.isTyping = true;
-            this.currentAssistantMessage = '';
-            this.currentAssistantMessageDiv = this.addMessage('', 'assistant', true);
-        }
-
-        this.currentAssistantMessage += delta;
-        const messageContent = this.currentAssistantMessageDiv.querySelector('.message-content');
-        messageContent.innerHTML = this.formatMarkdown(this.currentAssistantMessage);
-        this.scrollToBottom();
-    }
-
-    finalizeAssistantMessage(finalContent, isError = false) {
-        if (this.isTyping && this.currentAssistantMessageDiv) {
-            this.isTyping = false;
-            const messageContent = this.currentAssistantMessageDiv.querySelector('.message-content');
-            messageContent.innerHTML = this.formatMarkdown(finalContent || this.currentAssistantMessage);
-            this.currentAssistantMessageDiv.classList.remove('typing');
-
-            if (!isError) {
-                this.messageHistory.push({
-                    role: 'assistant',
-                    content: finalContent || this.currentAssistantMessage
-                });
+            if (tool.parameters) {
+                const parametersElement = toolElement.querySelector('.tool-parameters');
+                parametersElement.textContent = JSON.stringify(tool.parameters, null, 2);
             }
-        }
-        this.currentAssistantMessage = '';
-        this.currentAssistantMessageDiv = null;
-        this.sendButton.disabled = false;
-        this.messageInput.disabled = false;
-        this.messageInput.focus();
-    }
 
-    showError(error) {
-        console.error('Chat Error:', error);
-        const errorDiv = this.errorTemplate.content.cloneNode(true).querySelector('.error-message');
-        errorDiv.querySelector('.error-text').textContent = error;
-        this.messagesContainer.appendChild(errorDiv);
-        this.scrollToBottom();
-    }
-
-    formatMarkdown(content) {
-        if (typeof content !== 'string') return '';
-        
-        // Configure marked options
-        marked.setOptions({
-            highlight: function(code, lang) {
-                if (lang && hljs.getLanguage(lang)) {
-                    return hljs.highlight(code, { language: lang }).value;
-                }
-                return hljs.highlightAuto(code).value;
-            },
-            breaks: true,
-            gfm: true
+            this.toolsList.appendChild(toolElement);
         });
-
-        try {
-            return marked(content);
-        } catch (e) {
-            console.error('Markdown parsing error:', e);
-            return content;
-        }
     }
 
-    sendMessage() {
+    toggleTools() {
+        this.toolsPanel.classList.toggle('visible');
+        const isVisible = this.toolsPanel.classList.contains('visible');
+        this.toggleToolsBtn.setAttribute('aria-expanded', isVisible.toString());
+    }
+
+    async sendMessage() {
         const message = this.messageInput.value.trim();
-        if (!message || this.isTyping || this.ws.readyState !== WebSocket.OPEN) {
-            if (this.ws.readyState !== WebSocket.OPEN) {
-                this.addSystemMessage('Cannot send message: Not connected.');
-            }
-            return;
-        }
+        if (!message || !this.isConnected) return;
 
-        // Add user message to UI and history
+        // Add user message
         this.addMessage(message, 'user');
-        this.messageHistory.push({
-            role: 'user',
-            content: message
-        });
 
-        // Clear and disable input
+        // Clear input and reset height
         this.messageInput.value = '';
         this.messageInput.style.height = 'auto';
         this.sendButton.disabled = true;
-        this.messageInput.disabled = true;
 
-        // Send to server
-        this.ws.send(JSON.stringify({
-            message: message,
-            history: this.messageHistory
-        }));
-    }
+        // Add loading indicator
+        this.addLoadingIndicator();
 
-    handleKeyDown(event) {
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault();
-            this.sendMessage();
+        try {
+            await this.ws.send(JSON.stringify({
+                message: message,
+                history: [] // Currently not using history
+            }));
+        } catch (error) {
+            console.error('Error sending message:', error);
+            this.showError('Failed to send message');
+            this.removeLoadingIndicator();
         }
     }
 
+    addMessage(content, role = 'assistant') {
+        const messageElement = this.messageTemplate.content.cloneNode(true);
+        const messageDiv = messageElement.querySelector('.message');
+        messageDiv.classList.add(role);
+
+        const contentDiv = messageElement.querySelector('.message-content');
+        contentDiv.innerHTML = role === 'user' ? content : this.formatMarkdown(content);
+
+        this.chatMessages.appendChild(messageElement);
+        this.scrollToBottom();
+    }
+
+    addLoadingIndicator() {
+        const loadingElement = this.loadingTemplate.content.cloneNode(true);
+        loadingElement.querySelector('.loading-indicator').id = 'current-loading';
+        this.chatMessages.appendChild(loadingElement);
+        this.scrollToBottom();
+    }
+
+    removeLoadingIndicator() {
+        const loadingIndicator = document.getElementById('current-loading');
+        if (loadingIndicator) {
+            loadingIndicator.remove();
+        }
+    }
+
+    handleMessageDelta(delta) {
+        let currentMessage = document.querySelector('.message.assistant:last-child');
+        
+        if (!currentMessage) {
+            this.removeLoadingIndicator();
+            this.addMessage('');
+            currentMessage = document.querySelector('.message.assistant:last-child');
+        }
+
+        const contentDiv = currentMessage.querySelector('.message-content');
+        contentDiv.innerHTML = this.formatMarkdown(contentDiv.textContent + delta);
+        this.scrollToBottom();
+    }
+
+    finalizeAssistantMessage(message) {
+        this.removeLoadingIndicator();
+        const lastMessage = document.querySelector('.message.assistant:last-child');
+        
+        if (!lastMessage) {
+            this.addMessage(message);
+        } else {
+            const contentDiv = lastMessage.querySelector('.message-content');
+            contentDiv.innerHTML = this.formatMarkdown(message);
+        }
+        
+        this.scrollToBottom();
+    }
+
+    showError(message) {
+        const errorElement = this.errorTemplate.content.cloneNode(true);
+        errorElement.querySelector('.error-text').textContent = message;
+        this.chatMessages.appendChild(errorElement);
+        this.scrollToBottom();
+    }
+
+    formatMarkdown(text) {
+        return marked(text);
+    }
+
     scrollToBottom() {
-        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
     }
 }
 
-// Initialize the chat app when the page loads
+// Initialize the chat application when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.chatApp = new ChatApp();
 });
