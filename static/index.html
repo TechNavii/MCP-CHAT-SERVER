@@ -3,39 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP Chat</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <title>Pydantic AI MCP Chat</title>
     <!-- Add Inter font -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- Add Fira Code for code blocks -->
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code&display=swap" rel="stylesheet">
     <!-- Add Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <!-- Reference CSS from /static path -->
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="container">
         <div class="chat-container">
             <div class="chat-header">
-                <h1>MCP Chat</h1>
+                <h1>Pydantic AI MCP Chat</h1>
                 <div class="status">
                     <div class="status-indicator"></div>
                     <span>Connected</span>
                 </div>
             </div>
             
-            <div class="messages" id="messages">
-                <!-- Messages will be inserted here -->
+            <div class="chat-messages" id="chat-messages">
+                <!-- Messages will be added here -->
             </div>
 
-            <div class="input-container">
+            <div class="chat-input-container">
                 <div class="input-wrapper">
-                    <textarea 
-                        id="messageInput" 
+                    <textarea
+                        id="message-input"
                         placeholder="Type your message here..."
                         rows="1"
-                        autofocus></textarea>
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
                 </div>
-                <button id="sendButton" disabled>
+                <button id="send-button" onclick="sendMessage()">
                     <span class="material-icons">send</span>
                     <span>Send</span>
                 </button>
@@ -43,7 +45,7 @@
         </div>
     </div>
 
-    <!-- Message template -->
+    <!-- Message templates -->
     <template id="messageTemplate">
         <div class="message">
             <div class="message-content"></div>
@@ -67,6 +69,7 @@
         </div>
     </template>
 
+    <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.0.2/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
     <script src="/static/chat.js"></script>
